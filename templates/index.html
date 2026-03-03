@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>METAR Reader — Airport Weather Decoder</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --sky:    #0b6fba;
+      --sky-lt: #e8f4fd;
+      --sky-dk: #064d8a;
+      --card:   #ffffff;
+      --text:   #1a1a2e;
+      --muted:  #64748b;
+      --border: #cbd5e1;
+      --green:  #16a34a;
+      --red:    #dc2626;
+      --radius: 12px;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: linear-gradient(160deg, #0b6fba 0%, #0e3d6b 60%, #081f36 100%);
+      min-height: 100vh;
+      padding: 2rem 1rem;
+      color: var(--text);
+    }
+
+    /* ── Header ─────────────────────────────────── */
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    header h1 {
+      font-size: clamp(1.8rem, 5vw, 2.8rem);
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -0.5px;
+    }
+    header p {
+      color: rgba(255,255,255,0.75);
+      margin-top: 0.4rem;
+      font-size: 1rem;
+    }
+
+    /* ── Search card ─────────────────────────────── */
+    .search-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 1.75rem 2rem;
+      max-width: 560px;
+      margin: 0 auto 2rem;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+    }
+
+    .search-row {
+      display: flex;
+      gap: 0.75rem;
+    }
+
+    #airport-input {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #airport-input:focus { border-color: var(--sky); }
+    #airport-input::placeholder { letter-spacing: 0; font-weight: 400; color: #aaa; }
+
+    #search-btn {
+      padding: 0.75rem 1.5rem;
+      background: var(--sky);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+    #search-btn:hover  { background: var(--sky-dk); }
+    #search-btn:active { transform: scale(0.97); }
+    #search-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .examples {
+      margin-top: 0.75rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .examples span {
+      cursor: pointer;
+      color: var(--sky);
+      font-weight: 600;
+      margin: 0 4px;
+    }
+    .examples span:hover { text-decoration: underline; }
+
+    /* ── Results ─────────────────────────────────── */
+    #results { max-width: 700px; margin: 0 auto; }
+
+    /* Error */
+    .error-box {
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      color: var(--red);
+      font-weight: 600;
+      text-align: center;
+    }
+
+    /* Weather card */
+    .weather-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 1.75rem 2rem;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    }
+
+    .weather-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .airport-badge {
+      font-size: 2rem;
+      font-weight: 900;
+      color: var(--sky);
+      letter-spacing: 2px;
+    }
+
+    .obs-time {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    /* Summary sentence */
+    .summary {
+      background: var(--sky-lt);
+      border-left: 4px solid var(--sky);
+      border-radius: 6px;
+      padding: 0.9rem 1.1rem;
+      font-size: 1.05rem;
+      line-height: 1.6;
+      color: var(--text);
+      margin-bottom: 1.5rem;
+    }
+
+    /* Detail grid */
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .detail-cell {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+    }
+    .detail-cell .label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      font-weight: 700;
+      margin-bottom: 0.3rem;
+    }
+    .detail-cell .value {
+      font-size: 0.98rem;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.4;
+    }
+
+    /* Raw METAR collapsible */
+    details {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    summary {
+      cursor: pointer;
+      padding: 0.65rem 1rem;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      list-style: none;
+      user-select: none;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::before {
+      content: '▶ ';
+      font-size: 0.7rem;
+      transition: transform 0.2s;
+      display: inline-block;
+    }
+    details[open] summary::before { transform: rotate(90deg); }
+
+    .raw-metar {
+      font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+      font-size: 0.85rem;
+      padding: 0.75rem 1rem;
+      background: #1e293b;
+      color: #7dd3fc;
+      word-break: break-all;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Spinner */
+    .spinner {
+      text-align: center;
+      padding: 2rem;
+      color: rgba(255,255,255,0.8);
+      font-size: 1rem;
+    }
+    .spinner::after {
+      content: '';
+      display: block;
+      width: 36px;
+      height: 36px;
+      border: 4px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0.75rem auto 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Icons (simple emoji wrapper) */
+    .icon { margin-right: 0.35rem; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>✈ METAR Reader</h1>
+    <p>Enter an airport code to get a plain-English weather report.</p>
+  </header>
+
+  <div class="search-card">
+    <div class="search-row">
+      <input
+        id="airport-input"
+        type="text"
+        maxlength="5"
+        placeholder="e.g. KHIO"
+        autocomplete="off"
+        spellcheck="false"
+        aria-label="Airport ICAO code"
+      />
+      <button id="search-btn" onclick="fetchWeather()">Get Weather</button>
+    </div>
+    <p class="examples">
+      Try:
+      <span onclick="quickSearch('KHIO')">KHIO</span>
+      <span onclick="quickSearch('KLAX')">KLAX</span>
+      <span onclick="quickSearch('KJFK')">KJFK</span>
+      <span onclick="quickSearch('KORD')">KORD</span>
+      <span onclick="quickSearch('KSEA')">KSEA</span>
+    </p>
+  </div>
+
+  <div id="results"></div>
+
+  <script>
+    const input  = document.getElementById('airport-input');
+    const btn    = document.getElementById('search-btn');
+    const output = document.getElementById('results');
+
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') fetchWeather(); });
+
+    function quickSearch(code) {
+      input.value = code;
+      fetchWeather();
+    }
+
+    async function fetchWeather() {
+      const code = input.value.trim().toUpperCase();
+      if (!code) { input.focus(); return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Fetching…';
+      output.innerHTML = '<div class="spinner">Fetching weather data…</div>';
+
+      try {
+        const res  = await fetch(`/api/weather?airport=${encodeURIComponent(code)}`);
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+          output.innerHTML = `<div class="error-box">⚠ ${data.error || 'Unknown error'}</div>`;
+        } else {
+          renderWeather(data);
+        }
+      } catch (err) {
+        output.innerHTML = `<div class="error-box">⚠ Network error — please try again.</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Get Weather';
+      }
+    }
+
+    function cell(icon, label, value) {
+      if (!value) return '';
+      return `
+        <div class="detail-cell">
+          <div class="label"><span class="icon">${icon}</span>${label}</div>
+          <div class="value">${value}</div>
+        </div>`;
+    }
+
+    function renderWeather(data) {
+      const d = data.decoded;
+      output.innerHTML = `
+        <div class="weather-card">
+          <div class="weather-header">
+            <span class="airport-badge">${data.airport}</span>
+            ${d.time ? `<span class="obs-time">Observed at ${d.time}</span>` : ''}
+          </div>
+
+          <div class="summary">${data.summary}</div>
+
+          <div class="detail-grid">
+            ${cell('🌡️',  'Temperature',  d.temperature)}
+            ${cell('💨',  'Wind',         d.wind)}
+            ${cell('👁️',  'Visibility',   d.visibility)}
+            ${cell('☁️',  'Sky',          d.sky)}
+            ${cell('🌧️', 'Conditions',   d.weather)}
+            ${cell('💧',  'Dewpoint',     d.dewpoint)}
+            ${cell('📊',  'Pressure',     d.altimeter)}
+          </div>
+
+          <details>
+            <summary>Raw METAR</summary>
+            <div class="raw-metar">${escHtml(d.raw)}</div>
+          </details>
+        </div>`;
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+  </script>
+
+</body>
+</html>
